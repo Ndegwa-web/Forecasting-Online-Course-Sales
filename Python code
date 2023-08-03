@@ -1,0 +1,231 @@
+# Importing the libraries
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+from statsmodels.tsa.seasonal import seasonal_decompose
+from sklearn.model_selection import train_test_split
+from sklearn.model_selection import cross_val_score
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+# loading the data
+train_data=pd.read_csv('train.csv')
+test_data=pd.read_csv('test.csv')
+
+# training data description
+print(train_data.info())
+
+# testing data description
+print(test_data.info())
+
+# Data type conversion
+# Date conversion
+train_data['date'] = pd.to_datetime(train_data['date'])
+test_data['date'] = pd.to_datetime(test_data['date'])
+
+# Assuming 'date' is the name of the column containing the Timestamp data
+train_data['day'] = train_data['date'].dt.day
+train_data['month'] = train_data['date'].dt.month
+train_data['year'] = train_data['date'].dt.year
+
+# testing data
+test_data['day'] = test_data['date'].dt.day
+test_data['month'] =test_data['date'].dt.month
+test_data['year'] = test_data['date'].dt.year
+
+# num sold conversion
+train_data['num_sold'] = train_data['num_sold'].astype(int)
+
+# Feature Engineering
+# introducing new feature (season)
+# Create a function to map month numbers to seasons
+def get_season(month):
+    if 3 <= month <= 5:
+        return 'Spring'
+    elif 6 <= month <= 8:
+        return 'Summer'
+    elif 9 <= month <= 11:
+        return 'Fall'
+    else:
+        return 'Winter'
+
+train_data['Season'] = train_data['month'].apply(get_season)
+test_data['Season'] = test_data['month'].apply(get_season)
+
+# Categorical columns to encode using one-hot encoding
+categorical_columns = ['country', 'store', 'product','Season']
+
+# Apply one-hot encoding
+data_encoded = pd.get_dummies(train_data, columns=categorical_columns)
+test_encoded = pd.get_dummies(test_data, columns=categorical_columns)
+
+# Handling Missing Values
+# drop the date column 
+data_encoded= data_encoded.drop(columns=['date'])
+test_encoded= test_encoded.drop(columns=['date'])
+# To fill missing values with the mean
+data_encoded.fillna(data_encoded.mean(), inplace=True)
+test_encoded.fillna(test_encoded.mean(), inplace=True)
+
+# To drop rows with missing values
+data_encoded.dropna(inplace=True)
+test_encoded.dropna(inplace=True)
+
+#Exploratory Data Analysis
+# Data Visualization
+# Plot the distribution of the target variable
+plt.figure(figsize=(8, 5))
+plt.hist(data_encoded['num_sold'], bins=20)
+plt.title('Distribution of Mini-Course Sales')
+plt.xlabel('Number of Mini-Courses Sold')
+plt.show()
+
+# Plot the sales trend over time
+plt.figure(figsize=(12, 6))
+data_encoded['num_sold'].plot()
+plt.title('Mini-Course Sales Trend')
+plt.xlabel('Date')
+plt.ylabel('Number of Mini-Courses Sold')
+plt.show()
+
+# Correlation Analysis
+# Compute the correlation matrix
+correlation_matrix = data_encoded.corr()
+
+# Plot the correlation matrix as a heatmap
+plt.figure(figsize=(10, 8))
+sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', fmt='.2f', linewidths=0.5)
+plt.title('Correlation Matrix Heatmap')
+plt.show()
+
+# Feature Relationships
+# Seasonality and Trends
+
+# Decompose the time series
+decomposition = seasonal_decompose(data_encoded['num_sold'], model='additive', freq=30)  # Adjust 'period' as needed
+trend = decomposition.trend
+seasonal = decomposition.seasonal
+residual = decomposition.resid
+
+# Plot the components
+plt.figure(figsize=(12, 8))
+plt.subplot(411)
+plt.plot(data_encoded['num_sold'], label='Original')
+plt.legend(loc='upper left')
+plt.subplot(412)
+plt.plot(trend, label='Trend')
+plt.legend(loc='upper left')
+plt.subplot(413)
+plt.plot(seasonal, label='Seasonal')
+plt.legend(loc='upper left')
+plt.subplot(414)
+plt.plot(residual, label='Residual')
+plt.legend(loc='upper left')
+plt.tight_layout()
+plt.show()
+
+# Define the features (X) and target variable (y)
+X = data_encoded.drop(columns=['num_sold'])
+y = data_encoded['num_sold']
+
+# Split the data into training and testing sets
+train_size = 0.8  # Proportion of data to use for training (80% in this example)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=1 - train_size, random_state=0)
+
+# model selection 
+
+# Initialize models
+decision_tree_model = DecisionTreeRegressor(random_state=0)
+random_forest_model = RandomForestRegressor(random_state=0)
+
+# Perform cross-validation and evaluate Mean Absolute Error (MAE)
+def evaluate_model(model, X, y):
+    scores = cross_val_score(model, X, y, scoring='neg_mean_absolute_error', cv=5)
+    return -scores.mean()
+
+# Evaluate models using cross-validation
+decision_tree_mae = evaluate_model(decision_tree_model, X_train, y_train)
+random_forest_mae = evaluate_model(random_forest_model, X_train, y_train)
+
+print(f"Decision Tree MAE: {decision_tree_mae:.2f}")
+print(f"Random Forest MAE: {random_forest_mae:.2f}")
+
+# Initialize the Random Forest Regressor model
+model = RandomForestRegressor(random_state=0)
+
+# Model Training
+model.fit(X_train, y_train)
+
+# Model Prediction on the testing data
+y_pred = model.predict(X_test)
+
+# Model Evaluation
+mae = mean_absolute_error(y_test, y_pred)
+mse = mean_squared_error(y_test, y_pred)
+r2 = r2_score(y_test, y_pred)
+
+print(f"Mean Absolute Error (MAE): {mae:.2f}")
+print(f"Mean Squared Error (MSE): {mse:.2f}")
+print(f"R-squared (R2) Score: {r2:.2f}")
+
+# Make predictions for the future time periods
+forecast = model.predict(test_encoded)
+
+# Convert the forecast to a DataFrame with dates as the index
+forecast_df = pd.DataFrame(data=forecast, columns=['forecasted_sales'])
+
+print(forecast_df)
+
+#Model Performance Visualization
+# Scatter plot: Actual vs. Predicted values
+plt.figure(figsize=(8, 6))
+plt.scatter(y_test, y_pred, alpha=0.7)
+plt.xlabel('Actual Mini-Course Sales')
+plt.ylabel('Predicted Mini-Course Sales')
+plt.title('Actual vs. Predicted Mini-Course Sales')
+plt.show()
+
+# Line plot: Time Series of Actual vs. Predicted values (if dealing with time series data)
+plt.figure(figsize=(12, 6))
+plt.plot(y_test.index, y_test, label='Actual', marker='o')
+plt.plot(y_test.index, y_pred, label='Predicted', marker='o')
+plt.xlabel('Date')
+plt.ylabel('Mini-Course Sales')
+plt.title('Actual vs. Predicted Mini-Course Sales Over Time')
+plt.legend()
+plt.show()
+
+# Line plot: Forecasted Mini-Course Sales
+plt.figure(figsize=(12, 6))
+plt.plot(forecast_df.index, forecast_df['forecasted_sales'], marker='o')
+plt.xlabel('Date')
+plt.ylabel('Forecasted Mini-Course Sales')
+plt.title('Forecasted Mini-Course Sales Over Time')
+plt.show()
+
+#Feature Importance Visualization
+# Feature importance plot
+feature_importance = model.feature_importances_
+feature_names = X_train.columns
+sorted_indices = feature_importance.argsort()
+
+plt.figure(figsize=(10, 6))
+plt.barh(range(len(feature_names)), feature_importance[sorted_indices], align='center')
+plt.yticks(range(len(feature_names)), [feature_names[i] for i in sorted_indices])
+plt.xlabel('Feature Importance')
+plt.title('Feature Importance in the Model')
+plt.show()
+
+# Residual Plot
+residuals = y_test - y_pred
+
+plt.figure(figsize=(8, 6))
+plt.scatter(y_pred, residuals, alpha=0.7)
+plt.xlabel('Predicted Mini-Course Sales')
+plt.ylabel('Residuals')
+plt.axhline(y=0, color='red', linestyle='dashed')
+plt.title('Residual Plot')
+plt.show()
+
